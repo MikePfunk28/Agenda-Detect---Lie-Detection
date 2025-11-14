@@ -1,0 +1,5 @@
+{
+  "name": "Agenda Detector",
+  "description": "A local-first agenda analysis engine that analyzes political statements to identify potential hidden agendas using a simulated hybrid-agent AI model.",
+  "requestFramePermissions": []
+}
