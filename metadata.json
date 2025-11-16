@@ -1,5 +1,5 @@
 {
-  "name": "Agenda Detector",
-  "description": "A local-first agenda analysis engine that analyzes political statements to identify potential hidden agendas using a simulated hybrid-agent AI model.",
+  "name": "Agenda Detector - Local Analysis Engine",
+  "description": "A local-first desktop application to build and analyze comprehensive profiles of political subjects by ingesting and analyzing public data. This application is designed to be connected to a local backend with Ollama, LanceDB, and SQLite.",
   "requestFramePermissions": []
 }

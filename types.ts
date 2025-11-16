@@ -1,4 +1,3 @@
-
 export enum AnalysisStatus {
   IDLE = 'idle',
   RUNNING = 'running',
@@ -14,38 +13,68 @@ export interface ProgressStep {
   details?: any;
 }
 
-export interface AnalysisPlan {
-  steps: {
-    tool: 'linguistic_analysis' | 'web_search' | 'local_vector_search';
-    query: string;
-  }[];
+// FR-002.5: Metadata (Strict Schema)
+export type DocumentType = 'vote' | 'donation' | 'speech' | 'article' | 'leak' | 'tweet' | 'other';
+export interface IngestedDocument {
+    id: string;
+    subject: string;
+    type: DocumentType;
+    source: string; // filename or URL
+    date: string; // YYYY-MM-DD
+    content: string; // The text content
+    status: 'pending' | 'processing' | 'indexed' | 'error';
 }
+
+// Represents a single analysis report
+export interface FinalReport {
+  id: string;
+  originalStatement: string;
+  markdownReport: string;
+  evidence: Evidence;
+  progress: ProgressStep[];
+  timestamp: string;
+}
+
+// The central data structure for a political subject
+export interface Subject {
+  id: string;
+  name: string;
+  ingestedData: IngestedDocument[];
+  reports: FinalReport[];
+}
+
+
+// --- Analysis-specific types ---
 
 export interface LinguisticAnalysis {
   euphemisms: string[];
   framing: string;
-  emotional_language: string[];
+  plausibility: string;
 }
 
-export interface WebSearchResult {
-  title: string;
-  url: string;
-  snippet: string;
+export interface Contradiction {
+    sourceDocument: {
+        id: string;
+        source: string;
+        date: string;
+    };
+    contradictoryStatement: string;
+    explanation: string;
 }
 
-export interface VectorSearchResult {
-  source: string;
-  content: string;
+export interface Motive {
+    sourceDocument: {
+        id: string;
+        source: string;
+        date: string;
+        type: 'donation' | 'article';
+    };
+    potentialMotive: string;
+    explanation: string;
 }
 
 export interface Evidence {
   linguisticAnalysis: LinguisticAnalysis | null;
-  webSearches: WebSearchResult[];
-  vectorSearches: VectorSearchResult[];
-}
-
-export interface FinalReport {
-  originalStatement: string;
-  markdownReport: string;
-  evidence: Evidence;
+  inconsistencyChecks: Contradiction[];
+  motiveChecks: Motive[];
 }

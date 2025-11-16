@@ -1,140 +1,149 @@
-
 import React, { useState, useCallback } from 'react';
-import { runAnalysis } from './services/geminiService';
-import type { FinalReport, ProgressStep } from './types';
+import type { Subject, FinalReport, IngestedDocument } from './types';
 import { AnalysisStatus } from './types';
-import StatementInput from './components/StatementInput';
-import AnalysisProgress from './components/AnalysisProgress';
-import ReportDisplay from './components/ReportDisplay';
-import { BrainIcon, CpuChipIcon } from './components/icons';
-
-const initialProgress: ProgressStep[] = [
-  { name: 'Intake & Planning', status: 'pending' },
-  { name: 'Linguistic Analysis', status: 'pending' },
-  { name: 'Web Search', status: 'pending' },
-  { name: 'Local Vector Search', status: 'pending' },
-  { name: 'Synthesis & Reporting', status: 'pending' },
-];
+import SubjectPanel from './components/SubjectPanel';
+import SubjectProfile from './components/SubjectProfile';
+import { BrainIcon } from './components/icons';
+import { runAnalysis } from './services/localAnalysisService';
 
 const App: React.FC = () => {
-  const [statement, setStatement] = useState<string>('');
+  const [subjects, setSubjects] = useState<Subject[]>([
+    { id: 'subj-01', name: 'Politician X', ingestedData: [], reports: [] }
+  ]);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>('subj-01');
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>(AnalysisStatus.IDLE);
-  const [progress, setProgress] = useState<ProgressStep[]>(initialProgress);
-  const [finalReport, setFinalReport] = useState<FinalReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleAnalysis = useCallback(async () => {
-    if (!statement.trim()) {
-      setError('Please enter a statement to analyze.');
-      return;
+  const selectedSubject = subjects.find(s => s.id === selectedSubjectId) || null;
+
+  const handleAddSubject = (name: string) => {
+    if (name && !subjects.some(s => s.name === name)) {
+      const newSubject: Subject = {
+        id: `subj-${Date.now()}`,
+        name,
+        ingestedData: [],
+        reports: [],
+      };
+      setSubjects(prev => [...prev, newSubject]);
+      setSelectedSubjectId(newSubject.id);
     }
+  };
+
+  const handleDeleteSubject = (subjectId: string) => {
+    setSubjects(prev => prev.filter(s => s.id !== subjectId));
+    if (selectedSubjectId === subjectId) {
+      setSelectedSubjectId(null);
+    }
+  };
+  
+  const handleAddIngestedData = (subjectId: string, documents: IngestedDocument[]) => {
+      setSubjects(subjects => subjects.map(s => {
+          if (s.id === subjectId) {
+              return { ...s, ingestedData: [...s.ingestedData, ...documents] };
+          }
+          return s;
+      }));
+  };
+
+  const handleRunAnalysis = useCallback(async (subject: Subject, statement: string) => {
     setAnalysisStatus(AnalysisStatus.RUNNING);
     setError(null);
-    setFinalReport(null);
-    setProgress(initialProgress.map(p => ({ ...p, status: 'pending' })));
 
-    const updateProgress = (stepName: string, status: 'running' | 'completed' | 'error', details?: any) => {
-      setProgress(prev =>
-        prev.map(step =>
-          step.name === stepName ? { ...step, status, details } : step
-        )
-      );
+    // This function will be passed to the analysis service to update progress
+    const updateProgressOnSubject = (reportId: string, stepName: string, status: 'running' | 'completed' | 'error', details?: any) => {
+        setSubjects(prev => prev.map(s => {
+            if (s.id === subject.id) {
+                const report = s.reports.find(r => r.id === reportId);
+                if (report) {
+                    const updatedSteps = report.progress.map(p => p.name === stepName ? { ...p, status, details } : p);
+                    const updatedReport = { ...report, progress: updatedSteps };
+                    return { ...s, reports: s.reports.map(r => r.id === reportId ? updatedReport : r) };
+                }
+            }
+            return s;
+        }));
     };
 
+    // Create a preliminary report object to track progress
+    const reportId = `report-${Date.now()}`;
+    const initialReport: FinalReport = {
+        id: reportId,
+        originalStatement: statement,
+        markdownReport: '',
+        evidence: { linguisticAnalysis: null, inconsistencyChecks: [], motiveChecks: [] },
+        progress: [
+            { name: 'Linguistic Analysis', status: 'pending' },
+            { name: 'Inconsistency Check', status: 'pending' },
+            { name: 'Motive & Financial Analysis', status: 'pending' },
+            { name: 'Synthesis & Reporting', status: 'pending' },
+        ],
+        timestamp: new Date().toISOString(),
+    };
+    
+    // Add the report-in-progress to the subject
+    setSubjects(prev => prev.map(s => s.id === subject.id ? { ...s, reports: [initialReport, ...s.reports] } : s));
+    
     try {
-      const report = await runAnalysis(statement, updateProgress);
-      setFinalReport(report);
+      const completedReportData = await runAnalysis(subject, statement, (step, status, details) => updateProgressOnSubject(reportId, step, status, details));
+      
+      // Update the final report in the state
+      setSubjects(prev => prev.map(s => {
+          if (s.id === subject.id) {
+              const finalReport: FinalReport = { ...initialReport, ...completedReportData, progress: initialReport.progress.map(p => ({...p, status: 'completed'})) };
+              return { ...s, reports: s.reports.map(r => r.id === reportId ? finalReport : r) };
+          }
+          return s;
+      }));
       setAnalysisStatus(AnalysisStatus.SUCCESS);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
       setError(errorMessage);
       setAnalysisStatus(AnalysisStatus.ERROR);
-      setProgress(prev => prev.map(step => step.status === 'running' ? {...step, status: 'error'} : step));
+      // Mark the last running step as error
+       updateProgressOnSubject(reportId, 'Synthesis & Reporting', 'error');
     }
-  }, [statement]);
-  
-  const resetState = () => {
-    setStatement('');
-    setAnalysisStatus(AnalysisStatus.IDLE);
-    setProgress(initialProgress);
-    setFinalReport(null);
-    setError(null);
-  };
-
+  }, []);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-200 font-sans p-4 sm:p-6 lg:p-8">
-      <div className="max-w-4xl mx-auto">
-        
-        <header className="text-center mb-8">
-          <h1 className="text-4xl sm:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
-            Agenda Detector
-          </h1>
-          <p className="mt-2 text-lg text-gray-400">
-            AI-Powered Analysis of Political Statements
-          </p>
+    <div className="flex h-screen bg-gray-900 text-gray-200 font-sans">
+      <SubjectPanel
+        subjects={subjects}
+        selectedSubjectId={selectedSubjectId}
+        onSelectSubject={setSelectedSubjectId}
+        onAddSubject={handleAddSubject}
+        onDeleteSubject={handleDeleteSubject}
+      />
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <header className="bg-gray-800/50 border-b border-gray-700 p-4 flex items-center gap-4">
+            <BrainIcon className="h-8 w-8 text-cyan-400" />
+            <div>
+                <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
+                    Agenda Detector
+                </h1>
+                <p className="text-sm text-gray-400">Local-First Analysis Engine</p>
+            </div>
         </header>
 
-        <main className="space-y-8">
-          <div className="bg-gray-800/50 rounded-lg p-6 shadow-lg border border-gray-700">
-             <div className="flex flex-col md:flex-row gap-4 mb-6">
-                <div className="flex items-center gap-3 p-3 bg-gray-900/50 rounded-lg flex-1">
-                    <BrainIcon className="h-8 w-8 text-cyan-400 flex-shrink-0" />
-                    <div>
-                        <h3 className="font-bold text-white">Reasoning Agent (The "Brain")</h3>
-                        <p className="text-sm text-gray-400">Simulated Qwen3:4B-Thinking for planning, reasoning, and synthesis.</p>
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+            {selectedSubject ? (
+                <SubjectProfile 
+                    key={selectedSubject.id} 
+                    subject={selectedSubject}
+                    onRunAnalysis={(statement) => handleRunAnalysis(selectedSubject, statement)}
+                    onAddData={(docs) => handleAddIngestedData(selectedSubject.id, docs)}
+                    analysisStatus={analysisStatus}
+                    error={error}
+                />
+            ) : (
+                <div className="flex items-center justify-center h-full">
+                    <div className="text-center">
+                        <h2 className="text-2xl font-semibold text-gray-400">No Subject Selected</h2>
+                        <p className="mt-2 text-gray-500">Please select a subject from the left panel or add a new one to begin.</p>
                     </div>
                 </div>
-                <div className="flex items-center gap-3 p-3 bg-gray-900/50 rounded-lg flex-1">
-                    <CpuChipIcon className="h-8 w-8 text-blue-500 flex-shrink-0" />
-                    <div>
-                        <h3 className="font-bold text-white">Structured Output Agent (The "Parser")</h3>
-                        <p className="text-sm text-gray-400">Simulated Qwen3:1.7B for structured data extraction like linguistic analysis.</p>
-                    </div>
-                </div>
-            </div>
-
-            {analysisStatus === AnalysisStatus.IDLE || analysisStatus === AnalysisStatus.ERROR ? (
-               <StatementInput
-                statement={statement}
-                setStatement={setStatement}
-                onAnalyze={handleAnalysis}
-                isLoading={analysisStatus === AnalysisStatus.RUNNING}
-              />
-            ) : null}
-          </div>
-
-          {error && (
-            <div className="bg-red-900/50 border border-red-700 text-red-300 p-4 rounded-lg">
-              <p><span className="font-bold">Analysis Failed:</span> {error}</p>
-            </div>
-          )}
-
-          {analysisStatus !== AnalysisStatus.IDLE && (
-            <div className="bg-gray-800/50 rounded-lg p-6 shadow-lg border border-gray-700">
-              <h2 className="text-2xl font-bold mb-4 text-white">Analysis Workflow</h2>
-              <AnalysisProgress steps={progress} />
-            </div>
-          )}
-
-          {analysisStatus === AnalysisStatus.SUCCESS && finalReport && (
-             <ReportDisplay report={finalReport} onReset={resetState} />
-          )}
-
-          {analysisStatus === AnalysisStatus.RUNNING && (
-             <div className="flex justify-center items-center p-8 bg-gray-800/50 rounded-lg border border-gray-700">
-                <div className="flex flex-col items-center gap-4">
-                  <div className="w-12 h-12 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-lg text-gray-300">Analysis in progress, please wait...</p>
-                </div>
-             </div>
-          )}
-        </main>
-
-        <footer className="text-center mt-12 text-gray-500 text-sm">
-          <p>Powered by Gemini API. This is a frontend simulation of the provided design document.</p>
-        </footer>
-      </div>
+            )}
+        </div>
+      </main>
     </div>
   );
 };

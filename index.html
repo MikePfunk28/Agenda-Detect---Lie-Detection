@@ -1,11 +1,10 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Agenda Detector</title>
+    <title>Agenda Detector - Local Analysis Engine</title>
     <script src="https://cdn.tailwindcss.com"></script>
   <script type="importmap">
 {
@@ -17,6 +16,18 @@
   }
 }
 </script>
+  <style>
+    /* Basic CSS Reset */
+    *, *::before, *::after { box-sizing: border-box; }
+    body, h1, h2, h3, h4, p, figure, blockquote, dl, dd { margin: 0; }
+    html { scroll-behavior: smooth; }
+    body { 
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      line-height: 1.5;
+    }
+  </style>
 </head>
   <body class="bg-gray-900 text-gray-200">
     <div id="root"></div>
