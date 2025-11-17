@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
-import type { Subject, IngestedDocument, DocumentType } from '../types';
+import type { Subject, IngestedDocument } from '../types';
 import { FolderArrowDownIcon } from './icons';
+import { runAutomatedSearch } from '../services/localLLMService';
 
 interface DataIngestionProps {
   subject: Subject;
@@ -9,6 +10,7 @@ interface DataIngestionProps {
 
 const DataIngestion: React.FC<DataIngestionProps> = ({ subject, onAddData }) => {
   const [isDragging, setIsDragging] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
 
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -27,44 +29,75 @@ const DataIngestion: React.FC<DataIngestionProps> = ({ subject, onAddData }) => 
     e.stopPropagation();
   };
 
-  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
 
     const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      // FIX: Explicitly type `file` as `File` to fix type inference issue where it was treated as `unknown`.
-      const newDocs: IngestedDocument[] = Array.from(files).map((file: File) => ({
-        id: `doc-${Date.now()}-${Math.random()}`,
-        subject: subject.name,
-        type: 'other', // In a real app, we'd detect this
-        source: file.name,
-        date: new Date().toISOString().split('T')[0],
-        content: `(Simulated content of ${file.name})`,
-        status: 'indexed', // Simulate immediate indexing for UI
-      }));
-      onAddData(newDocs);
-      alert(`${files.length} file(s) added for ingestion. This is a simulation.`);
+    if (!files || files.length === 0) return;
+
+    const readFileAsText = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsText(file);
+        });
+    };
+
+    const newDocs: IngestedDocument[] = [];
+    // FIX: Add a type guard to ensure 'file' is a File object. This resolves
+    // TypeScript errors about properties like '.name' not existing on type 'unknown'
+    // and makes the error handling in the catch block type-safe.
+    for (const file of Array.from(files)) {
+        if (file instanceof File) {
+            let content = `(Content of binary file '${file.name}' not readable in browser)`;
+            if (file.type.startsWith('text/') || file.name.endsWith('.json') || file.name.endsWith('.md') || file.name.endsWith('.csv')) {
+                try {
+                    content = await readFileAsText(file);
+                } catch (err) {
+                    const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+                    content = `(Error reading file: ${errorMessage})`;
+                }
+            }
+            newDocs.push({
+                id: `doc-${Date.now()}-${Math.random()}`,
+                subject: subject.name,
+                type: 'other',
+                source: file.name,
+                date: new Date().toISOString().split('T')[0],
+                content,
+                status: 'indexed',
+            });
+        }
+    }
+
+    if (newDocs.length > 0) {
+        onAddData(newDocs);
+        alert(`${newDocs.length} file(s) processed for ingestion.`);
     }
   }, [subject.name, onAddData]);
 
-  const handleAutomatedSearch = () => {
-    // This is a mock for the UI. In a real app, this would trigger the backend.
-    alert(`Simulating automated search for "${subject.name}". This would trigger the backend Qwen3:4B agent to search public records.`);
-    const newDocs: IngestedDocument[] = [
-        {
-            id: `doc-${Date.now()}`,
-            subject: subject.name,
-            type: 'article',
-            source: 'https://simulated-news.com/article-123',
-            date: new Date().toISOString().split('T')[0],
-            content: `A new simulated article about ${subject.name} was found and indexed.`,
-            status: 'indexed'
+  const handleAutomatedSearch = async () => {
+    setIsSearching(true);
+    try {
+        const newDocs = await runAutomatedSearch(subject.name);
+        if (newDocs && newDocs.length > 0) {
+            onAddData(newDocs);
+            alert(`${newDocs.length} new documents found and ingested by the local agent.`);
+        } else {
+            alert(`The local agent found no new documents for "${subject.name}".`);
         }
-    ];
-    onAddData(newDocs);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+        console.error("Automated search failed:", error);
+        alert(`Automated search failed. Make sure your local LLM server is running and configured correctly in Settings.\n\nError: ${errorMessage}`);
+    } finally {
+        setIsSearching(false);
+    }
   };
+
 
   return (
     <div className="space-y-6">
@@ -83,7 +116,7 @@ const DataIngestion: React.FC<DataIngestionProps> = ({ subject, onAddData }) => 
           >
             <FolderArrowDownIcon className="h-12 w-12 text-gray-500 mb-2" />
             <p className="text-gray-400">Drag & drop files here</p>
-            <p className="text-sm text-gray-500">.pdf, .txt, .mp3, .mp4, etc.</p>
+            <p className="text-sm text-gray-500">.txt, .md, .json, etc.</p>
           </div>
         </div>
 
@@ -91,13 +124,24 @@ const DataIngestion: React.FC<DataIngestionProps> = ({ subject, onAddData }) => 
         <div className="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
           <h3 className="text-xl font-bold mb-4 text-white">Automated Ingestion</h3>
           <p className="text-gray-400 mb-4">
-            Trigger the backend agent to search for new public records, articles, voting records, and donor reports for this subject.
+            Trigger the local agent to search for new public records, articles, voting records, and donor reports.
           </p>
           <button
             onClick={handleAutomatedSearch}
-            className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-blue-500"
+            disabled={isSearching}
+            className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed"
           >
-            Run Automated Search
+             {isSearching ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Searching...
+                </>
+              ) : (
+                'Run Automated Search'
+              )}
           </button>
         </div>
       </div>
@@ -118,7 +162,7 @@ const DataIngestion: React.FC<DataIngestionProps> = ({ subject, onAddData }) => 
                 <tbody className="bg-gray-800 divide-y divide-gray-700">
                     {subject.ingestedData.map(doc => (
                         <tr key={doc.id}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-300" title={doc.source}>{doc.source}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-300 truncate max-w-xs" title={doc.source}>{doc.source}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400 capitalize">{doc.type}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{doc.date}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm">

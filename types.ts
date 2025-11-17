@@ -13,6 +13,11 @@ export interface ProgressStep {
   details?: any;
 }
 
+export interface LLMSettings {
+  endpoint: string;
+  model: string;
+}
+
 // FR-002.5: Metadata (Strict Schema)
 export type DocumentType = 'vote' | 'donation' | 'speech' | 'article' | 'leak' | 'tweet' | 'other';
 export interface IngestedDocument {

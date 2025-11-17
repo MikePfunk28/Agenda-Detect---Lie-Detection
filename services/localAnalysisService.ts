@@ -1,112 +1,58 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import type { Subject, FinalReport, LinguisticAnalysis, Contradiction, Motive, Evidence } from '../types';
-
-if (!process.env.API_KEY) {
-  throw new Error("API_KEY environment variable is not set for the UI mock service.");
-}
-
-// This service uses the Gemini API to SIMULATE the behavior of the local models
-// described in the PRD. The prompts are designed to make Gemini act as if it were
-// a local agent querying a local database.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+import { generate, parseLLMJson } from './localLLMService';
 
 type UpdateProgressCallback = (stepName: string, status: 'running' | 'completed' | 'error', details?: any) => void;
 
 // FR-003.2a: Linguistic Analysis
 async function executeLinguisticAnalysis(statement: string): Promise<LinguisticAnalysis> {
-    const prompt = `You are acting as a specialized local model (Qwen3:1.7B). Your task is to perform a linguistic analysis on the provided text. Analyze it for euphemisms, framing, and overall plausibility.
+    const prompt = `You are acting as a specialized local model. Your task is to perform a linguistic analysis on the provided text. Analyze it for euphemisms, framing, and overall plausibility.
 Text: "${statement}"
-Output ONLY a valid JSON object matching the specified schema.`;
+Output ONLY a valid JSON object matching the specified schema.
+Schema:
+{
+  "euphemisms": ["string"],
+  "framing": "string",
+  "plausibility": "string"
+}`;
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    euphemisms: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    framing: { type: Type.STRING },
-                    plausibility: { type: Type.STRING, description: "A brief assessment of the statement's plausibility on its own." },
-                },
-                required: ["euphemisms", "framing", "plausibility"],
-            }
-        }
-    });
-    return JSON.parse(response.text);
+    const responseText = await generate(prompt, true);
+    return parseLLMJson(responseText);
 }
 
 // FR-003.2b: Inconsistency Check
 async function executeInconsistencyCheck(subject: Subject, statement: string): Promise<Contradiction[]> {
-  const prompt = `You are acting as a reasoning agent (Qwen3:4B). You are analyzing a new statement from '${subject.name}'. Your task is to find contradictions by comparing the new statement against their historical data from a local vector database.
+  const prompt = `You are acting as a reasoning agent. You are analyzing a new statement from '${subject.name}'. Your task is to find contradictions by comparing the new statement against their historical data from a local vector database.
   
 New Statement: "${statement}"
 
-Historical Data for ${subject.name} (from local LanceDB):
+Historical Data for ${subject.name} (from local database):
 \`\`\`json
 ${JSON.stringify(subject.ingestedData.slice(0, 10), null, 2)}
 \`\`\`
 
 Find up to 2 direct contradictions. For each, explain why it's a contradiction and cite the source document. If no contradictions are found, return an empty array.
-Output ONLY a valid JSON object matching the specified schema.`;
+Output ONLY a valid JSON object matching the specified schema (an array of contradictions).`;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-pro',
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            sourceDocument: { type: Type.OBJECT, properties: { id: {type: Type.STRING}, source: {type: Type.STRING}, date: {type: Type.STRING} } },
-            contradictoryStatement: { type: Type.STRING },
-            explanation: { type: Type.STRING },
-          },
-          required: ["sourceDocument", "contradictoryStatement", "explanation"],
-        },
-      }
-    }
-  });
-  return JSON.parse(response.text);
+  const responseText = await generate(prompt, true);
+  return parseLLMJson(responseText) || [];
 }
 
 // FR-003.2c: Motive & Financial Analysis
 async function executeMotiveCheck(subject: Subject, statement: string): Promise<Motive[]> {
-  const prompt = `You are acting as a reasoning agent (Qwen3:4B). You are analyzing a new statement from '${subject.name}'. Your task is to identify potential financial motives or conflicts of interest by checking their historical data, especially donations and financially-related articles.
+  const prompt = `You are acting as a reasoning agent. You are analyzing a new statement from '${subject.name}'. Your task is to identify potential financial motives or conflicts of interest by checking their historical data, especially donations and financially-related articles.
 
 New Statement: "${statement}"
 
-Historical Data for ${subject.name} (from local LanceDB, filtered for donations/finance):
+Historical Data for ${subject.name} (from local database, filtered for donations/finance):
 \`\`\`json
 ${JSON.stringify(subject.ingestedData.filter(d => d.type === 'donation' || d.type === 'article').slice(0, 10), null, 2)}
 \`\`\`
 
 Find up to 2 potential motives or conflicts. For each, explain the connection and cite the source. If none are found, return an empty array.
-Output ONLY a valid JSON object matching the specified schema.`;
+Output ONLY a valid JSON object matching the specified schema (an array of motives).`;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-pro',
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            sourceDocument: { type: Type.OBJECT, properties: { id: {type: Type.STRING}, source: {type: Type.STRING}, date: {type: Type.STRING}, type: {type: Type.STRING} } },
-            potentialMotive: { type: Type.STRING },
-            explanation: { type: Type.STRING },
-          },
-          required: ["sourceDocument", "potentialMotive", "explanation"],
-        },
-      }
-    }
-  });
-  return JSON.parse(response.text);
+  const responseText = await generate(prompt, true);
+  return parseLLMJson(responseText) || [];
 }
 
 
@@ -135,13 +81,10 @@ ${JSON.stringify(evidence.motiveChecks, null, 2)}
 \`\`\`
 
 **Your Task:**
-Write a comprehensive, objective report based ONLY on the provided information. Structure it with headings: ## Summary, ## Detailed Findings, and ## Potential Agenda.`;
+Write a comprehensive, objective report in Markdown format based ONLY on the provided information. Structure it with headings: ## Summary, ## Detailed Findings, and ## Potential Agenda.`;
   
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-pro',
-    contents: prompt,
-  });
-  return response.text;
+  const responseText = await generate(prompt, false);
+  return responseText;
 }
 
 // Main analysis orchestrator
@@ -176,8 +119,8 @@ export const runAnalysis = async (subject: Subject, statement: string, updatePro
   } catch (error) {
     console.error("Analysis failed:", error);
     if (error instanceof Error) {
-        throw new Error(`Error during analysis simulation: ${error.message}`);
+        throw new Error(`Error during local analysis: ${error.message}`);
     }
-    throw new Error('An unknown error occurred during analysis simulation.');
+    throw new Error('An unknown error occurred during local analysis.');
   }
 };
